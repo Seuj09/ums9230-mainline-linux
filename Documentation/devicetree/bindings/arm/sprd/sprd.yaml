@@ -37,6 +37,7 @@ properties:
 
       - items:
           - enum:
+              - infinix,x6525
               - reeder,s19mps
           - const: sprd,ums9230
 
