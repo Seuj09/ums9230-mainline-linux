@@ -53,6 +53,12 @@ required:
   - "#interrupt-cells"
   - interrupts
 
+patternProperties:
+  "-hog(-[0-9]+)?$":
+    type: object
+    required:
+      - gpio-hog
+
 additionalProperties: false
 
 examples:
