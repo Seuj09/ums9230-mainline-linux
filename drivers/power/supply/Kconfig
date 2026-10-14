@@ -768,6 +768,15 @@ config CHARGER_PM8916_LBC
 	  To compile this driver as module, choose M here: the
 	  module will be called pm8916_lbc.
 
+config CHARGER_EXTCON_DETECT
+	tristate "USB charger power supply backed by an extcon"
+	depends on EXTCON
+	help
+	  Say Y here to expose what an extcon device reports (VBUS, or the
+	  BC1.2 charger types) as a USB power supply with a current limit,
+	  for chargers such as the bq2415x that follow such a supply through
+	  "ti,usb-charger-detection".
+
 config CHARGER_BQ2415X
 	tristate "TI BQ2415x battery charger driver"
 	depends on I2C
