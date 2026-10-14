@@ -115,6 +115,16 @@ config DRM_PANEL_CHIPONE_ICNL9916_720_1600
 	  MIPI-DSI video mode panel with a resolution of 720x1600.
 	  This type of panel is mainly found on mobile phones.
 
+config DRM_PANEL_TD4160_HX
+	tristate "TD4160 HX 720x1612 panel"
+	depends on OF
+	depends on DRM_MIPI_DSI
+	depends on BACKLIGHT_CLASS_DEVICE
+	help
+	  Say Y here if you want to enable support for the TD4160 HX
+	  MIPI-DSI video mode panel with a resolution of 720x1612, as
+	  found in the Infinix X6525.
+
 config DRM_PANEL_CHIPWEALTH_CH13726A
 	tristate "CHIPWEALTH CH13726A-based DSI panel"
 	depends on OF
