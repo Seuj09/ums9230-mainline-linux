@@ -1,0 +1,743 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Infinix X6525 ("Infinix Smart 8") - Unisoc UMS9230 (Tiger T606)
+ *
+ * Board support for the UMS9230-1H10-GO reference design variant. It builds,
+ * but nothing here has run on the hardware yet.
+ *
+ * Every value is either:
+ *   [T]  traced to a named source, or
+ *   TODO still to be read off the device or confirmed on hardware.
+ *
+ * Sources, in the order they were used:
+ *   - Structure: ums9230-reeder-s19mps.dts (Jolla C2, same SoC, mainline).
+ *   - The running stock system's own expanded device tree (/proc/device-tree
+ *     on the stock ROM) - the authority for the panel, touch, charger,
+ *     storage, thermistors and the battery profile.
+ *   - The vendor dtbo (entry 18, "UMS9230-1H10-GO Board") and the stock 5.4
+ *     tree, for what the live tree does not carry.
+ *   - Hardware present: config-helix-stock.aarch64.
+ *
+ * The device reports: model "Spreadtrum UMS9230-1H10-GO Board", compatible
+ * "sprd,ums9230-1h10-go", panel TD4160 HX at 720x1612, console ttyS1, eMMC on
+ * sdio3 as the boot device, microSD on sdio0.
+ *
+ * Upstreaming checklist - see dts/README.md for the full list.
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/usb/pd.h>
+
+#include "ums9230.dtsi"
+#include "sc2730.dtsi"
+
+/ {
+	model = "Infinix X6525";
+	compatible = "infinix,x6525", "sprd,ums9230";
+
+	aliases {
+		serial0 = &uart0;
+		serial1 = &uart1;		/* ttyS1 [T: console=ttyS1,115200n8] */
+		/* the internal storage is the eMMC, so it is the first mmc
+		 * device: sprdboot.flash=emmc and androidboot.boot_devices=
+		 * .../201d0000.sdio, sdio0 is the microSD slot */
+		mmc0 = &sdio3;
+		i2c0 = &i2c0;
+		i2c1 = &i2c1;
+		i2c2 = &i2c2;
+		i2c3 = &i2c3;
+		i2c4 = &i2c4;
+		i2c5 = &i2c5;			/* chargers are here [T] */
+		i2c6 = &i2c6;
+		i2c7 = &aon_i2c0;
+	};
+
+	chosen {
+		stdout-path = "serial1:115200n8";	/* [T] */
+
+		framebuffer {
+			compatible = "simple-framebuffer";
+			memory-region = <&framebuffer_region>;
+			width = <720>;
+			height = <1612>;	/* [T: lcd_size=1612x720] */
+			stride = <(720 * 4)>;
+			format = "a8r8g8b8";
+
+			/*
+			 * The bootloader leaves this scanning out, so simpledrm gives a
+			 * console even if the DPU/DSI/panel stack fails to probe. Once
+			 * that stack is known good, disable this so it takes over alone.
+			 */
+			status = "okay";
+		};
+	};
+
+	reserved-memory {
+		framebuffer_region: framebuffer-region@9e000000 {
+			compatible = "framebuffer";
+			/* base confirmed: the bootloader passes lcd_base=9e000000 */
+			reg = <0 0x9e000000 0 (720 * 1612 * 4)>;
+			iommu-addresses = <&dpu 0x9e000000 (720 * 1612 * 4)>;
+			no-map;
+			/* one 720x1612 frame at 4 bytes/px, which is what the
+			 * bootloader hands over (lcd_base, lcd_size, logo_bpix).
+			 * The stock tree reserves more at this base - its
+			 * logobuffer@9e000000 is 0xab0000 - but everything the
+			 * bootloader and U-Boot draw fits inside this size. */
+		};
+
+		ramoops@fff80000 {
+			compatible = "ramoops";
+			reg = <0x0 0xfff80000 0x0 0x40000>;
+			console-size = <0x8000>;
+			record-size = <0x8000>;
+			pmsg-size = <0x8000>;
+			/* confirmed against the running device: its own
+			 * ramoops@fff80000 carries exactly these values */
+		};
+
+		/*
+		 * The overlay names this at 0xb7200000; reg carries 0x9f727000,
+		 * because the bootloader places this TEE-adjacent region itself
+		 * and patches reg to suit. Left mapped, the kernel could speculate
+		 * into it; re-read the live tree if the bootloader ever moves it.
+		 */
+		tkv-mem@9f727000 {
+			reg = <0x0 0x9f727000 0x0 0x8000>;
+			no-map;
+		};
+
+		linux,cma {
+			compatible = "shared-dma-pool";
+			size = <0x0 0x8000000>;
+			reusable;
+			linux,cma-default;
+		};
+	};
+
+	/*
+	 * No backlight node: this board has no PWM backlight. Brightness is
+	 * written into the panel over DCS (sprd,backlight-param-write = 1, 12-bit
+	 * with sprd,max-level = 0xfff), so the panel driver registers the
+	 * backlight itself. The vendor's brightness-levels table in the board DT
+	 * is not reproduced yet.
+	 */
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		key-volumedown {
+			wakeup-source;
+			debounce-interval = <2>;
+			gpios = <&ap_gpio 124 GPIO_ACTIVE_LOW>;	/* board DT: gpio 0x7c, flag 1 */
+			linux,code = <KEY_VOLUMEDOWN>;
+		};
+
+		key-volumeup {
+			wakeup-source;
+			debounce-interval = <2>;
+			/* The running system's own tree has volume-up on the PMIC
+			 * EIC (pin 4), not on the AP GPIO the board overlay names;
+			 * the vendor flag is 0, so active-high. */
+			gpios = <&pmic_eic 4 GPIO_ACTIVE_HIGH>;
+			linux,code = <KEY_VOLUMEUP>;
+		};
+
+		key-power {
+			wakeup-source;
+			debounce-interval = <2>;
+			gpios = <&pmic_eic 1 GPIO_ACTIVE_LOW>;	/* board DT: gpio 1, flag 1;
+								 * phandle unresolved in the
+								 * overlay dump - same as the reeder */
+			linux,code = <KEY_POWER>;
+		};
+	};
+
+	speaker_amp: speaker-amp {
+		compatible = "simple-audio-amplifier";
+		sound-name-prefix = "Speaker Amp";
+		/* the vendor's sprd,spk-ext-pa-gpio, read off the running device
+		 * (ap_gpio 0x71, flag 0 = active-high). The reeder's equivalent
+		 * amp sits on ap_gpio 136. */
+		enable-gpios = <&ap_gpio 113 GPIO_ACTIVE_HIGH>;
+	};
+
+	bat: battery {
+		compatible = "simple-battery";
+		/* scalars, OCV and resistance tables read off the running device;
+		 * the vendor JEITA tables are downstream extras and not carried */
+		charge-full-design-microamp-hours = <4950000>;
+		charge-term-current-microamp = <200000>;
+		constant-charge-voltage-max-microvolt = <4400000>;
+		voltage-min-design-microvolt = <3450000>;
+		factory-internal-resistance-micro-ohms = <140000>;
+		resistance-temp-table = <50 80>, <25 100>, <10 168>,
+					<0 421>, <(-10) 688>;
+		ocv-capacity-celsius = <20>;
+		ocv-capacity-table-0 = <4380000 100>, <4312000 95>,
+				       <4248000 90>, <4191000 85>,
+				       <4135000 80>, <4081000 75>,
+				       <4029000 70>, <3977000 65>,
+				       <3937000 60>, <3875000 55>,
+				       <3839000 50>, <3813000 45>,
+				       <3795000 40>, <3780000 35>,
+				       <3772000 30>, <3762000 25>,
+				       <3746000 20>, <3722000 15>,
+				       <3683000 10>, <3623000 5>,
+				       <3400000 0>;
+		/* The board DT also carries charge-sdp/dcp/cdp-current-microamp
+		 * (500/2000/1500 mA). Nothing in mainline reads them and the battery
+		 * schema rejects them; the same limits live in usb_detect's
+		 * default/dedicated-charger/cdp-microamp, which does act on them. */
+	};
+};
+
+/* ---- storage ------------------------------------------------------------
+ * Confirmed from the device's cmdline: internal storage is eMMC
+ * (sprdboot.flash=emmc) on sdio3 (androidboot.boot_devices=.../201d0000.sdio),
+ * while sdio0 is the microSD slot (downstream 1h10-go adds a card-detect to it).
+ * The reeder is the opposite way round: UFS internally, sdio0 for the card, so
+ * its storage nodes cannot be copied.
+ */
+&sdio0 {
+	/* microSD slot, the rescue boot path. The timing values are the running
+	 * device's own (sdio@201a0000); the vendor's sd-detect-pol-syscon and
+	 * sd-hotplug-* properties are its own and are not in the binding.
+	 */
+	cd-gpios = <&eic_sync 35 GPIO_ACTIVE_LOW>;	/* eic_sync confirmed: the running system */
+							/* has gpio-355 "cd" on the eic-sync chip; the */
+							/* reeder's eic_async is not this board. It read */
+							/* high with the slot empty, so low = card in. */
+	vmmc-supply = <&vddsdcore>;
+	vqmmc-supply = <&vddsdio>;
+	bus-width = <4>;
+	sd-uhs-sdr104;
+	sd-uhs-sdr50;
+	no-sdio;
+	no-mmc;
+
+	sprd,phy-delay-legacy = <0x7f 0x1a 0x9a 0x9a>;
+	sprd,phy-delay-sd-highspeed = <0x7f 0x1a 0x9a 0x9a>;
+	sprd,phy-delay-sd-uhs-sdr50 = <0x6e 0x7f 0x1 0x1>;
+	sprd,phy-delay-sd-uhs-sdr104 = <0x7f 0x73 0x72 0x72>;
+	status = "okay";
+};
+
+&sdio3 {
+	/* eMMC - the boot device. Read off the running device's own
+	 * sdio@201d0000 node (`sprd,name = "sdio_emmc"`), phy delays included:
+	 * they are this board's tuning, not the driver's defaults, and
+	 * sdhci-sprd reads exactly these four-cell properties.
+	 *
+	 * The HS200/HS400 flags describe the part. Note that sdhci-sprd keeps
+	 * SDHCI_QUIRK2_BROKEN_HS200 set for sprd,sdhci-r11, which clears
+	 * MMC_CAP2_HS200 in the core - and HS400 is gated behind HS200 - so
+	 * expect the link to come up at DDR52 for now.
+	 */
+	bus-width = <8>;
+	cap-mmc-hw-reset;
+	mmc-hs400-enhanced-strobe;
+	mmc-hs400-1_8v;
+	mmc-hs200-1_8v;
+	mmc-ddr-1_8v;
+	non-removable;
+	no-sdio;
+	no-sd;
+
+	sprd,phy-delay-mmc-highspeed = <0x60 0x2e 0x2c 0x2c>;
+	sprd,phy-delay-mmc-ddr52 = <0x3e 0x6a 0x48 0x48>;
+	sprd,phy-delay-mmc-hs200 = <0x7f 0xb5 0xb5 0xb5>;
+	sprd,phy-delay-mmc-hs400 = <0x3f 0xb5 0x3d 0x3d>;
+	sprd,phy-delay-mmc-hs400es = <0x40 0x80 0x3d 0x3d>;
+
+	vmmc-supply = <&vddemmccore>;
+	/* No vqmmc-supply: vddsdio is the microSD slot's IO rail (it is
+	 * &sdio0's vqmmc above), and the running system's eMMC node names no
+	 * IO supply of its own - the port had the card slot's rail here. */
+	status = "okay";
+};
+
+/* ---- USB ----------------------------------------------------------------
+ * The SoC USB controller is MUSB (sprd,ums9230-musb) - same as the reeder, and
+ * the reason USB_MUSB_HDRC/SPRD must be built in for pmOS USB networking.
+ *
+ * The provider is the PMIC Type-C/PD controller (&pmic_typec_pd), whose
+ * mainline driver is sc27xx_pd.c: the stock device points its MUSB at that same
+ * controller plus the VBUS gpio extcon, and runs dr-mode = "peripheral".
+ *
+ * The role switch is kept even though this board only ever acts as a device:
+ * musb-sprd.c takes the mode from the build config rather than from dr_mode, so
+ * a kernel built with both USB_MUSB_HOST and USB_MUSB_GADGET comes up as a host
+ * until the role switch says otherwise - which is what the reeder relies on.
+ */
+&hsphy {
+	phy-supply = <&vddusb33>;
+	status = "okay";
+};
+
+&usb {
+	dr_mode = "otg";
+	usb-role-switch;
+	role-switch-default-mode = "peripheral";
+	status = "okay";
+
+	port {
+		usb_hs_ep: endpoint {
+			remote-endpoint = <&tcpc_hs_ep>;
+		};
+	};
+};
+
+/ {
+	vbus_extcon: extcon-vbus {
+		compatible = "linux,extcon-usb-gpio";
+		vbus-gpio = <&pmic_eic 0 GPIO_ACTIVE_HIGH>;	/* stock: extcon-gpio */
+	};
+
+	usb_detect: usb-charger-detect {
+		compatible = "linux,extcon-charger-detect";
+		extcon = <&vbus_extcon>;
+	};
+};
+
+/* ---- PMIC / charging ----------------------------------------------------
+ * The bq2560x/bq2597x parts in the stock config (and the downstream generic
+ * 1h10-go overlay) are for *other* 1h10 variants. This board instead uses a
+ * Transsion "tran_charger" wrapping an Awinic AW32257:
+ *
+ *   tran_charger { compatible = "tran_charger"; chargers = "aw32257"; ... }
+ *
+ * The AW32257 is a register-compatible TI bq24158: the live device tree has
+ * it on i2c3 (20100000) at 0x6a, and its registers read back as
+ * 00=d0 01=30 02=b6 03=53 04=59. Register 0x03 = 0x53 decodes with
+ * bq2415x_charger.c as vender 2, part number 2, revision 3, and at address
+ * 0x6a that driver reports exactly "bq24158, revision 1.0" - the string the
+ * stock driver prints. The vendor node's property names (ti,current-limit
+ * and the rest) are the mainline driver's own, so no new driver is needed.
+ * Units: mainline wants mA / mV / mohm, the vendor node mixes uA and mV
+ * (650000 uA -> 650 mA, 100000 -> 100, 60000 -> 60).
+ *
+ * charge,chg-pd-gpio is ap_gpio 115, which the running system names
+ * "charger_en" and holds LOW while the battery charges (debugfs gpio, phone on
+ * a charger, status Charging). Driven low it is the bq24158's active-low CE
+ * pin, so it is hogged low below to keep charging enabled. Not carried over:
+ * the otg-vbus regulator, tran_charger and charger-manager.
+ * The driver learns what is plugged in from a power supply: usb_detect below
+ * (drivers/extcon-charger-detect.c) turns the VBUS pin that the stock
+ * extcon-gpio node reads (pmic_eic 0) into one. A plain VBUS pin cannot tell a
+ * wall charger from a PC, so everything is limited to 500 mA for now; BC1.2
+ * detection in the SC2730 would raise that and has no mainline driver.
+ * PMIC is still SC2730 (androidboot.pmic.chipid=2730).
+ */
+&ap_gpio {
+	/* "charger_en", low = charging enabled - see the comment above */
+	charger-en-hog {
+		gpio-hog;
+		gpios = <115 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "charger_en";
+	};
+};
+
+&i2c4 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/*
+	 * The vendor overlay (entry 18) names a "st,stmvl53l0" with reg = <0x52>,
+	 * a VL53L0X time-of-flight proximity sensor, which mainline drives as
+	 * st,vl53l0x. 0x52 is the 8-bit form of the address (ST's API default);
+	 * Linux wants the 7-bit one, and the part powers up at 0x29 (0x52 >> 1).
+	 * The stock kernel registered a client at 7-bit 0x52 and bound no driver.
+	 *
+	 * The overlay gives XSHUT as 168 and the interrupt as 169, bare numbers.
+	 * They are ap_gpio numbers: its interrupts property is <169 8> with
+	 * ap_gpio as the interrupt parent, and that specifier is chip-local. Not
+	 * confirmed on hardware; if the sensor does not probe, XSHUT is the first
+	 * suspect. The vendor's level-low interrupt becomes an edge here, which is
+	 * what the driver defaults to.
+	 */
+	proximity@29 {
+		compatible = "st,vl53l0x";
+		reg = <0x29>;
+		reset-gpios = <&ap_gpio 168 GPIO_ACTIVE_LOW>;
+		interrupt-parent = <&ap_gpio>;
+		interrupts = <169 IRQ_TYPE_EDGE_FALLING>;
+	};
+};
+
+&i2c3 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	charger: charger@6a {
+		compatible = "ti,bq24158";
+		reg = <0x6a>;
+		ti,current-limit = <100>;		/* mA, vendor 100000 uA */
+		ti,weak-battery-voltage = <3400>;	/* mV */
+		ti,battery-regulation-voltage = <4400>;	/* mV */
+		ti,charge-current = <650>;		/* mA, vendor 650000 uA */
+		ti,termination-current = <60>;		/* mA, vendor 60000 uA */
+		ti,resistor-sense = <56>;		/* mohm */
+		ti,usb-charger-detection = <&usb_detect>;
+	};
+};
+
+&pmic_typec_pd {
+	/* No vbus-supply: the vendor's is the charger's own otg-vbus regulator
+	 * (its node has nothing but a name - the charger driver registers it),
+	 * and mainline's bq2415x registers no regulator for that boost.
+	 * sc27xx_pd.c treats a missing vbus as -ENODEV and carries on, so this
+	 * costs the source role, nothing else. */
+	status = "okay";
+
+	connector {
+		compatible = "usb-c-connector";
+		label = "USB-C";
+		data-role = "dual";
+		power-role = "dual";
+		try-power-role = "sink";
+		source-pdos = <PDO_FIXED(5000, 1200, PDO_FIXED_USB_COMM)>;
+		sink-pdos = <PDO_FIXED(5000, 3000, PDO_FIXED_USB_COMM)>;
+		op-sink-microwatt = <10000000>;
+
+		port {
+			tcpc_hs_ep: endpoint {
+				remote-endpoint = <&usb_hs_ep>;
+			};
+		};
+	};
+};
+
+/*
+ * The three board thermistors the stock tree describes (board/tboard on adc
+ * channel 1, pa on 2, chg on 4 of the SC2730 ADC). All three share one NTC
+ * table, read off the running device: millidegrees Celsius against the ADC
+ * reading in mV. The stock zones carry no trips and no polling, so these only
+ * expose the temperatures (chg reads about 4 C, so that one is probably not
+ * populated on this board). The stock zones are called board-thmzone, pa-thmzone
+ * and chg-thmzone; the thermal-zones schema only accepts <name>-thermal.
+ */
+/ {
+	tboard_thermistor: tboard-thermistor {
+		compatible = "generic-adc-thermal";
+		#thermal-sensor-cells = <0>;
+		io-channels = <&pmic_adc 1>;
+		io-channel-names = "sensor-channel";
+		temperature-lookup-table = <
+			(-39742) 1131
+			(-29777) 1110
+			(-19480) 1074
+			(-4679) 983
+			10110 838
+			24805 654
+			44922 413
+			54903 316
+			64895 238
+			74884 178
+			84883 133
+			94883 100
+			104880 75
+			114889 57
+			124872 43
+		>;
+	};
+	pa_thermistor: pa-thermistor {
+		compatible = "generic-adc-thermal";
+		#thermal-sensor-cells = <0>;
+		io-channels = <&pmic_adc 2>;
+		io-channel-names = "sensor-channel";
+		temperature-lookup-table = <
+			(-39742) 1131
+			(-29777) 1110
+			(-19480) 1074
+			(-4679) 983
+			10110 838
+			24805 654
+			44922 413
+			54903 316
+			64895 238
+			74884 178
+			84883 133
+			94883 100
+			104880 75
+			114889 57
+			124872 43
+		>;
+	};
+	chg_thermistor: chg-thermistor {
+		compatible = "generic-adc-thermal";
+		#thermal-sensor-cells = <0>;
+		io-channels = <&pmic_adc 4>;
+		io-channel-names = "sensor-channel";
+		temperature-lookup-table = <
+			(-39742) 1131
+			(-29777) 1110
+			(-19480) 1074
+			(-4679) 983
+			10110 838
+			24805 654
+			44922 413
+			54903 316
+			64895 238
+			74884 178
+			84883 133
+			94883 100
+			104880 75
+			114889 57
+			124872 43
+		>;
+	};
+
+	thermal-zones {
+		board-thermal {
+			polling-delay = <0>;
+			polling-delay-passive = <0>;
+			thermal-sensors = <&tboard_thermistor>;
+		};
+
+		pa-thermal {
+			polling-delay = <0>;
+			polling-delay-passive = <0>;
+			thermal-sensors = <&pa_thermistor>;
+		};
+
+		chg-thermal {
+			polling-delay = <0>;
+			polling-delay-passive = <0>;
+			thermal-sensors = <&chg_thermistor>;
+		};
+	};
+};
+
+&sc2730_fgu {
+	monitored-battery = <&bat>;
+	/* Read off the running device (fgu@c00 in its own tree), not the
+	 * reeder's value: this is the coulomb counter's sense resistance and
+	 * the driver requires it, so it has to be this board's number. */
+	sprd,calib-resistance-micro-ohms = <10000>;
+	power-supplies = <&charger>;
+	status = "okay";
+};
+
+/* ---- display ------------------------------------------------------------
+ * Confirmed on the device's own cmdline: lcd_name=lcd_td4160_hx_mipi_hdp_x6525,
+ * i.e. the TD4160 HX variant at 720x1612. No mainline driver exists for it yet;
+ * one is drafted in this repo at drivers/panel-td4160-hx.c. Only the driver's
+ * structure follows the reeder's panel-chipone-icnl9916-720x1600.c: its DCS
+ * sequence, its reset sequence and the mode timings are this device's own,
+ * read off the board's own dtbo entry 18 (the panel node the bootloader
+ * selects) - display-timings/timing0 is the native mode, 959x2668 at 153.6 MHz.
+ */
+&disp {
+	status = "okay";
+};
+
+&dpu {
+	memory-region = <&framebuffer_region>;
+	status = "okay";
+};
+
+&dsi {
+	status = "okay";
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	panel@0 {
+		/* the module is only ever named "HX"/"TD4160" in the vendor
+		 * data and that panel vendor has no registered prefix, so this
+		 * uses the board vendor's; see drivers/panel-td4160-hx.c */
+		compatible = "infinix,td4160-hx-panel";
+		reg = <0>;
+		/* board DT: ap_gpio 0x32 with flag 0 = active-high.
+		 * Flip this first if the panel stays dark. */
+		reset-gpios = <&ap_gpio 50 GPIO_ACTIVE_HIGH>;
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&dsi_out>;
+			};
+		};
+	};
+};
+
+&dsi_out {
+	remote-endpoint = <&panel_in>;
+};
+
+/* ---- touchscreen --------------------------------------------------------
+ * Confirmed twice over: the device's bound driver is omnivision_tcm_spi
+ * (spi3.0) with input device "omnivision_tcm_touch", and the board DT's
+ * supplier table pairs this panel with omnivision:
+ *   supplier-1 = "lcd_td4160_hx_mipi_hdp_x6525, omnivision, td4160";
+ * The vendor loads focaltech_ft8722, focaltech_ft8756_spi_ts and
+ * nvt_nt36xxx_spi_ts as candidates too, but himax and chipone are absent.
+ * No mainline driver exists for this part (and mainline's edt-ft5x06 is
+ * I2C-only), so omnivision_tcm/ from the stock tree has to be ported.
+ * The GPIOs below are from the board DT, not the generic downstream node.
+ */
+&spi3 {
+	status = "okay";
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	touchscreen@0 {
+		compatible = "omnivision,tcm-spi";
+		reg = <0>;
+		spi-max-frequency = <8000000>;	/* board DT: ubl-max-freq 0x7a1200 */
+		spi-cpha;			/* SPI mode 3, as the vendor sets it */
+		spi-cpol;
+		/* The running system's own tree carries the interrupt on
+		 * eic_async 16, not on the AP GPIO 16 the board overlay names
+		 * (irq-gpio 0x10) - on the AP GPIO the controller never sees
+		 * the first IDENTIFY report. The chip holds the line low until
+		 * the report has been read, so level-low is safer than an edge
+		 * (no missed first report). */
+		interrupts-extended = <&eic_async 16 IRQ_TYPE_LEVEL_LOW>;
+		/* board DT: reset-gpio 0x91. The vendor's reset_on_state = 0, so
+		 * reset is asserted low (they drive it low for 20 ms and release
+		 * it), which makes the line active-low. */
+		reset-gpios = <&ap_gpio 145 GPIO_ACTIVE_LOW>;
+		/*
+		 * The module the stock system runs asks for hdl_firmware_01.img:
+		 * that is the only hdl_firmware name in its strings, and
+		 * /vendor/firmware holds hdl_firmware_00.img and _01.img. Mind the
+		 * double digit - the images in the stock *kernel tree*
+		 * (hdl_firmware_0/1.img) would not resolve on this device, and the
+		 * tree's driver does not select them by panel name either.
+		 *
+		 * The image still has to be packaged; it goes under
+		 * /lib/firmware/postmarketos/sprd, like the other firmware for this
+		 * SoC.
+		 */
+		firmware-name = "postmarketos/sprd/hdl_firmware_01.img";
+	};
+};
+
+/*
+ * The stock device tree marks LDO_VDDLDO0 (2.8 V peripheral rail) always-on;
+ * sc2730.dtsi leaves it off by default, so regulator_late_cleanup disables it
+ * ~30 s into boot if nothing claims it.
+ */
+&vddldo0 {
+	regulator-always-on;
+};
+
+/* ---- SoC blocks that are already plain mainline ------------------------ */
+
+&cpufreq {
+	sprd,soc-version = /bits/ 64 <0x36303654>;	/* "T606" - same SoC [T] */
+	status = "okay";
+};
+
+&gpu {
+	mali-supply = <&vddgpu>;
+	status = "okay";
+};
+
+&modem {
+	status = "okay";
+};
+
+&modem_dai {
+	status = "okay";
+};
+
+&sc2730_codec {
+	status = "okay";
+};
+
+&uart0 {
+	status = "okay";
+};
+
+&uart1 {
+	status = "okay";
+};
+
+&wcn {
+	/*
+	 * The dtsi names none of the supplies or GPIOs the block's driver asks
+	 * for: drivers/remoteproc/sprd_wcn.c requires three regulators, an
+	 * enable line and a reset line, and the dtsi has none of them. The
+	 * supplies are the SoC rails the reeder's board node names (and the
+	 * driver's own regulator list: vdd, vddwifipa, dcxo1v8); the enable and
+	 * reset lines are the ones the running system holds high as
+	 * "merlion-chip-en" (ap_gpio 118) and "merlion-rst" (ap_gpio 117) - the
+	 * same lines the reeder uses.
+	 *
+	 * Wi-Fi and Bluetooth use the mainline Unisoc stack in this kernel, not
+	 * the stock sprd_wlan_combo/wcn_bsp one: sprd_wcn.c brings the block up
+	 * and loads "sprd/wcnmodem.bin" (named in the dtsi's btwf child), and
+	 * sc23xx_wlan / sc23xx_wlan_sipc drive WLAN over SIPC, with btsprdsipc
+	 * for Bluetooth. Wi-Fi was verified on this board on 2026-10-21.
+	 */
+	enable-gpios = <&ap_gpio 118 GPIO_ACTIVE_HIGH>;
+	reset-gpios = <&ap_gpio 117 GPIO_ACTIVE_LOW>;
+	vdd-supply = <&vddwcn>;
+	vddwifipa-supply = <&vddwifipa>;
+	dcxo1v8-supply = <&vddsim2>;
+	status = "okay";
+};
+
+&sound {
+	model = "infinix-x6525";
+	/* Same codec (SC2730) and same amplifier arrangement as the reeder, so
+	 * the card's widgets and routing are the reeder's; the amplifier is
+	 * board-specific and is the speaker_amp node above. */
+	widgets =
+		"Headphone", "Headphones",
+		"Speaker", "Speaker",
+		"Line", "Modem Uplink",
+		"Line", "Modem Downlink";
+	pin-switches = "Speaker";
+	audio-routing =
+		"Headphones", "HPL_OUT",
+		"Headphones", "HPR_OUT",
+		"Speaker Amp INL", "HPL_OUT",
+		"Speaker Amp INR", "HPR_OUT",
+		"Speaker", "Speaker Amp OUTL",
+		"Speaker", "Speaker Amp OUTR",
+		"Modem Uplink", "Modem DAI AOUT",
+		"Modem DAI AIN", "Modem Downlink";
+	aux-devs = <&modem_dai>, <&speaker_amp>;
+	status = "okay";
+
+	iis0-dai-link {
+		link-name = "IIS0";
+		dai-format = "i2s";
+		frame-inversion;
+		sprd,fixed-fmt = <24>;
+
+		codec {
+			sound-dai = <&dig_codec 0>, <&sc2730_codec 0>;
+		};
+	};
+
+	iis1-dai-link {
+		link-name = "IIS1";
+		dai-format = "i2s";
+		frame-inversion;
+		sprd,fixed-fmt = <24>;
+
+		codec {
+			sound-dai = <&dig_codec 1>, <&sc2730_codec 1>;
+		};
+	};
+
+	voice-dai-link {
+		link-name = "VOICE";
+
+		codec {
+			sound-dai = <&modem_dai>;
+		};
+	};
+};
