@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/panel/infinix,td4160-hx-panel.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: TD4160 HX 720x1612 MIPI-DSI LCD panel
+
+maintainers:
+  - Seuj09 <Seuj09@users.noreply.github.com>
+
+description: |
+  The TD4160 is a 720x1612 LCD panel with a MIPI-DSI interface. This variant
+  ("HX", per the vendor device tree's sprd,lcm_ic_vendor) is found in the
+  Infinix X6525, where the bootloader reports lcd_name
+  "lcd_td4160_hx_mipi_hdp_x6525". It is a video mode DSI panel.
+
+  Brightness is written into the panel over DCS (12-bit, register 0x51), so
+  there is no backlight phandle; the driver registers the backlight itself.
+
+allOf:
+  - $ref: panel-common.yaml#
+
+properties:
+  compatible:
+    const: infinix,td4160-hx-panel
+
+  reg:
+    maxItems: 1
+    description: DSI virtual channel of the peripheral
+
+  reset-gpios:
+    description: |
+      Panel reset. The vendor device tree drives it active-high; this is the
+      first thing to check if the panel stays dark.
+
+required:
+  - compatible
+  - reg
+  - reset-gpios
+  - port
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+
+    dsi {
+      #address-cells = <1>;
+      #size-cells = <0>;
+
+      panel@0 {
+        compatible = "infinix,td4160-hx-panel";
+        reg = <0>;
+
+        reset-gpios = <&ap_gpio 50 GPIO_ACTIVE_HIGH>;
+
+        port {
+          td4160_in: endpoint {
+            remote-endpoint = <&dsi_out>;
+          };
+        };
+      };
+    };
