@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/input/touchscreen/omnivision,tcm-spi.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: OmniVision TCM touchscreen controller (SPI, host firmware download)
+
+maintainers:
+  - Seuj09 <jeus110310@gmail.com>
+
+description: |
+  Touch controller of the TD4160 touch/display IC. It has no flash: after each
+  reset the host downloads the application firmware and its configuration from
+  an image file.
+
+allOf:
+  - $ref: /schemas/spi/spi-peripheral-props.yaml#
+
+properties:
+  compatible:
+    const: omnivision,tcm-spi
+
+  reg:
+    maxItems: 1
+
+  # SPI mode 3. spi-peripheral-props.yaml does not cover these two, so a
+  # peripheral that needs them declares them, as e.g. samsung,ld9040.yaml does.
+  spi-cpha: true
+  spi-cpol: true
+
+  interrupts:
+    maxItems: 1
+
+  reset-gpios:
+    maxItems: 1
+    description: |
+      Reset line. The controller is held in reset while it is asserted: the
+      vendor device tree drives it low for 20 ms and then releases it, so the
+      line is active-low.
+
+  firmware-name:
+    description: HDL image requested through request_firmware().
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - reset-gpios
+  - firmware-name
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+    #include <dt-bindings/interrupt-controller/irq.h>
+    spi {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        touchscreen@0 {
+            compatible = "omnivision,tcm-spi";
+            reg = <0>;
+            spi-max-frequency = <8000000>;
+            spi-cpha;
+            spi-cpol;
+            interrupts-extended = <&gpio 16 IRQ_TYPE_LEVEL_LOW>;
+            reset-gpios = <&gpio 145 GPIO_ACTIVE_LOW>;
+            firmware-name = "postmarketos/sprd/hdl_firmware_01.img";
+        };
+    };
+...
