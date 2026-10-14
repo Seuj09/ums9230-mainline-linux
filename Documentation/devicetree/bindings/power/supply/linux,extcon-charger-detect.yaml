@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/power/supply/linux,extcon-charger-detect.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: USB charger power supply backed by an extcon
+
+maintainers:
+  - Seuj09 <jeus110310@gmail.com>
+
+description:
+  Reports what an extcon device sees (VBUS, or the BC1.2 charger types) as a
+  USB power supply with a current limit. Chargers that follow such a supply,
+  like the TI bq2415x through ti,usb-charger-detection, use it to pick their
+  input current.
+
+properties:
+  compatible:
+    const: linux,extcon-charger-detect
+
+  extcon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: extcon device to follow.
+
+  default-microamp:
+    description: Limit for a standard downstream port or a plain VBUS extcon.
+    default: 500000
+
+  cdp-microamp:
+    description: Limit for a charging downstream port.
+    default: 1500000
+
+  dedicated-charger-microamp:
+    description: Limit for a dedicated charger.
+    default: 2000000
+
+required:
+  - compatible
+  - extcon
+
+additionalProperties: false
+
+examples:
+  - |
+    usb-charger-detect {
+        compatible = "linux,extcon-charger-detect";
+        extcon = <&vbus_extcon>;
+    };
+...
