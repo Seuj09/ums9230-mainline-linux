@@ -657,6 +657,20 @@ config TOUCHSCREEN_MAX11801
 	  To compile this driver as a module, choose M here: the
 	  module will be called max11801_ts.
 
+config TOUCHSCREEN_OVT_TCM_SPI
+	tristate "OmniVision TCM touchscreen controller (SPI)"
+	depends on SPI && OF
+	select FW_LOADER
+	select CRC32
+	help
+	  Say Y here to enable support for OmniVision TCM touch controllers
+	  with host firmware download (e.g. TD4160 in the Infinix X6525)
+	  connected over SPI. The controller needs an HDL firmware image
+	  from userspace.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called ovt-tcm-spi.
+
 config TOUCHSCREEN_MMS114
 	tristate "MELFAS MMS114 touchscreen"
 	depends on I2C
