@@ -310,6 +310,16 @@ static int sprd_wdt_probe(struct platform_device *pdev)
 		dev_err(dev, "failed to enable wdt\n");
 		return ret;
 	}
+
+	/*
+	 * The bootloader may already have started the counter. The core only
+	 * keeps a running watchdog fed until userspace opens it if it is told
+	 * so, and start() is the one place that sets the flag, so a counter
+	 * left running would otherwise expire and reset the system before
+	 * anything had a chance to open it.
+	 */
+	if (readl_relaxed(wdt->base + SPRD_WDT_CTRL) & SPRD_WDT_CNT_EN_BIT)
+		set_bit(WDOG_HW_RUNNING, &wdt->wdd.status);
 	ret = devm_add_action_or_reset(dev, sprd_wdt_disable, wdt);
 	if (ret) {
 		dev_err(dev, "Failed to add wdt disable action\n");
