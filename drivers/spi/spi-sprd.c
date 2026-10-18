@@ -89,6 +89,7 @@
 /* Bits & mask definition for register SPI_INT_CLR */
 #define SPRD_SPI_RX_END_INT_CLR		BIT(9)
 #define SPRD_SPI_TX_END_INT_CLR		BIT(8)
+#define SPRD_SPI_ALL_INT_CLR		0x33f
 
 /* Bits & mask definition for register SPI_INT_RAW */
 #define SPRD_SPI_RX_END_IRQ		BIT(9)
@@ -210,7 +211,8 @@ static int sprd_spi_wait_for_tx_end(struct sprd_spi *ss, struct spi_transfer *t)
 		return ret;
 	}
 
-	writel_relaxed(SPRD_SPI_TX_END_INT_CLR, ss->base + SPRD_SPI_INT_CLR);
+	writel_relaxed(SPRD_SPI_TX_END_INT_CLR | SPRD_SPI_RX_END_INT_CLR,
+		       ss->base + SPRD_SPI_INT_CLR);
 
 	return 0;
 }
@@ -228,7 +230,8 @@ static int sprd_spi_wait_for_rx_end(struct sprd_spi *ss, struct spi_transfer *t)
 		return ret;
 	}
 
-	writel_relaxed(SPRD_SPI_RX_END_INT_CLR, ss->base + SPRD_SPI_INT_CLR);
+	writel_relaxed(SPRD_SPI_TX_END_INT_CLR | SPRD_SPI_RX_END_INT_CLR,
+		       ss->base + SPRD_SPI_INT_CLR);
 
 	return 0;
 }
@@ -409,6 +412,8 @@ static int sprd_spi_txrx_bufs(struct spi_device *sdev, struct spi_transfer *t)
 			trans_len;
 		if (ss->trans_mode & SPRD_SPI_TX_MODE) {
 			sprd_spi_set_tx_length(ss, len);
+			if (ss->trans_mode & SPRD_SPI_RX_MODE)
+				sprd_spi_set_rx_length(ss, len);
 			write_size += ss->write_bufs(ss, len);
 
 			/*
@@ -614,6 +619,7 @@ static int sprd_spi_dma_txrx_bufs(struct spi_device *sdev,
 	}
 
 	if (ss->trans_mode & SPRD_SPI_RX_MODE) {
+		sprd_spi_set_rx_length(ss, trans_len);
 		/*
 		 * Set up the DMA receive data length, which must be an
 		 * integral multiple of fragment length. But when the length
@@ -707,6 +713,9 @@ static int sprd_spi_init_hw(struct sprd_spi *ss, struct spi_transfer *t)
 		val &= ~SPRD_SPI_DATA_LINE2_EN;
 
 	writel_relaxed(val, ss->base + SPRD_SPI_CTL7);
+
+	/* Clear all interrupt status */
+	writel_relaxed(SPRD_SPI_ALL_INT_CLR, ss->base + SPRD_SPI_INT_CLR);
 
 	return 0;
 }
