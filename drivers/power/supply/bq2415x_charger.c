@@ -27,6 +27,8 @@
 #include <linux/i2c.h>
 #include <linux/slab.h>
 #include <linux/acpi.h>
+#include <linux/of.h>
+#include <linux/regulator/driver.h>
 
 #include <linux/power/bq2415x_charger.h>
 
@@ -1540,6 +1542,80 @@ static int bq2415x_power_supply_init(struct bq2415x_device *bq)
 }
 
 /* main bq2415x probe function */
+/**** OTG boost regulator ****/
+
+/*
+ * The charger's boost converter is what supplies VBUS when the port is a USB
+ * host (an OTG adapter or a partner that asks for power). Expose it as a
+ * regulator so the Type-C port manager can turn it on and off through
+ * vbus-supply, instead of leaving the data role switched to host with no
+ * power on the port.
+ */
+static int bq2415x_otg_enable(struct regulator_dev *rdev)
+{
+	struct bq2415x_device *bq = rdev_get_drvdata(rdev);
+
+	/* boost and charging are mutually exclusive */
+	if (bq->automode >= 0)
+		bq->automode = 0;
+
+	return bq2415x_set_mode(bq, BQ2415X_MODE_BOOST);
+}
+
+static int bq2415x_otg_disable(struct regulator_dev *rdev)
+{
+	struct bq2415x_device *bq = rdev_get_drvdata(rdev);
+	enum bq2415x_mode mode = BQ2415X_MODE_OFF;
+
+	if (bq->automode >= 0) {
+		bq->automode = 1;
+		mode = bq->reported_mode;
+	}
+
+	return bq2415x_set_mode(bq, mode);
+}
+
+static int bq2415x_otg_is_enabled(struct regulator_dev *rdev)
+{
+	struct bq2415x_device *bq = rdev_get_drvdata(rdev);
+
+	return bq->mode == BQ2415X_MODE_BOOST;
+}
+
+static const struct regulator_ops bq2415x_otg_ops = {
+	.enable = bq2415x_otg_enable,
+	.disable = bq2415x_otg_disable,
+	.is_enabled = bq2415x_otg_is_enabled,
+};
+
+static const struct regulator_desc bq2415x_otg_desc = {
+	.name = "bq2415x-otg",
+	.type = REGULATOR_VOLTAGE,
+	.owner = THIS_MODULE,
+	.ops = &bq2415x_otg_ops,
+};
+
+static int bq2415x_otg_regulator_init(struct bq2415x_device *bq,
+				      struct device_node *np)
+{
+	struct device_node *otg_np;
+	struct regulator_config config = {
+		.dev = bq->dev,
+		.driver_data = bq,
+	};
+	struct regulator_dev *rdev;
+
+	otg_np = of_get_child_by_name(np, "otg-vbus");
+	if (!otg_np)
+		return 0;
+
+	config.of_node = otg_np;
+	rdev = devm_regulator_register(bq->dev, &bq2415x_otg_desc, &config);
+	of_node_put(otg_np);
+
+	return PTR_ERR_OR_ZERO(rdev);
+}
+
 static int bq2415x_probe(struct i2c_client *client)
 {
 	const struct i2c_device_id *id = i2c_client_get_device_id(client);
@@ -1654,6 +1730,15 @@ static int bq2415x_probe(struct i2c_client *client)
 	if (ret) {
 		dev_err(bq->dev, "failed to set default values: %d\n", ret);
 		goto error_3;
+	}
+
+	if (np) {
+		ret = bq2415x_otg_regulator_init(bq, np);
+		if (ret) {
+			dev_err(bq->dev, "failed to register OTG regulator: %d\n",
+				ret);
+			goto error_3;
+		}
 	}
 
 	if (bq->notify_node || bq->init_data.notify_device) {

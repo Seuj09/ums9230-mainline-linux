@@ -63,6 +63,13 @@ properties:
     $ref: /schemas/types.yaml#/definitions/phandle
     description: phandle to usb charger detection device (required for auto mode)
 
+  otg-vbus:
+    $ref: /schemas/regulator/regulator.yaml#
+    description: |
+      Boost converter that supplies VBUS when the port acts as a USB host.
+      Boards that can source power describe it here, so the Type-C port
+      manager can enable it through its vbus-supply.
+
 required:
   - compatible
   - reg
