@@ -217,9 +217,9 @@ static int td4160_panel_unprepare(struct drm_panel *panel)
 /*
  * display-timings/timing1 from the board DT: the panel's 90 Hz mode. The pixel
  * clock is the same as the 60 Hz mode; only the blanking differs, 933 x 1828
- * totals at 153.6 MHz = 90.05 Hz. It is the preferred mode, so a compositor
- * that just takes the preferred mode gets 90 Hz; the 60 Hz mode stays
- * available for anything that asks for it.
+ * totals at 153.6 MHz = 90.05 Hz. It stays an option, not the preferred mode:
+ * the stock board DT's native-mode is timing0 (60 Hz), and the 90 Hz timing
+ * has not been accepted by this mainline DSI/DPU path on hardware yet.
  */
 static const struct drm_display_mode td4160_panel_mode_90 = {
 	.clock = 153600,
@@ -233,13 +233,14 @@ static const struct drm_display_mode td4160_panel_mode_90 = {
 	.vtotal = 1612 + 180 + 4 + 32,		/* vback-porch 0x20 */
 	.width_mm = 68,				/* sprd,width-mm 0x44 */
 	.height_mm = 152,			/* sprd,height-mm 0x98 */
-	.type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED,
+	.type = DRM_MODE_TYPE_DRIVER,
 };
 
 /*
- * display-timings/timing0: the panel's 60 Hz mode. The blanking looks odd
- * (vfront is 1020 lines) but the totals are self-consistent: 959 x 2668 at
- * 153.6 MHz is 60.03 Hz.
+ * display-timings/timing0: the panel's 60 Hz mode and the board DT's
+ * native-mode. The blanking looks odd (vfront is 1020 lines) but the totals
+ * are self-consistent: 959 x 2668 at 153.6 MHz is 60.03 Hz. Keep it preferred:
+ * the stock system boots this mode, and the 90 Hz timing is an alternative.
  */
 static const struct drm_display_mode td4160_panel_mode_60 = {
 	.clock = 153600,
@@ -253,7 +254,7 @@ static const struct drm_display_mode td4160_panel_mode_60 = {
 	.vtotal = 1612 + 1020 + 4 + 32,		/* vback-porch 0x20 */
 	.width_mm = 68,				/* sprd,width-mm 0x44 */
 	.height_mm = 152,			/* sprd,height-mm 0x98 */
-	.type = DRM_MODE_TYPE_DRIVER,
+	.type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED,
 };
 
 static int td4160_panel_get_modes(struct drm_panel *panel,
