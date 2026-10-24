@@ -8,6 +8,8 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
+#include <linux/random.h>
 #include <linux/rpmsg.h>
 
 #include <net/bluetooth/bluetooth.h>
@@ -146,6 +148,7 @@ static int btsprdsipc_probe(struct rpmsg_device *rpdev)
 	const struct firmware *fw;
 	struct btsprdsipc *bts;
 	struct hci_dev *hdev;
+	bdaddr_t addr;
 	int ret;
 
 	bts = devm_kzalloc(&rpdev->dev, sizeof(*bts), GFP_KERNEL);
@@ -185,6 +188,33 @@ static int btsprdsipc_probe(struct rpmsg_device *rpdev)
 	bts->hu.hdev = hdev;
 	bts->ept = rpdev->ept;
 	SET_HCIDEV_DEV(hdev, &rpdev->dev);
+
+	/*
+	 * The dtsi leaves local-bd-address for the bootloader to fill in.
+	 * U-Boot's ft_board_setup() writes it from its "bdaddr" environment
+	 * variable, which is unset on this board, and string_to_enetaddr(NULL)
+	 * zero-fills - so the property ends up all-zero. The HCI core rejects
+	 * an all-zero (or missing) property, leaves public_addr zero and
+	 * therefore never calls set_bdaddr(), which is where this driver
+	 * sends the pskey and RF configuration - so the controller would
+	 * never be initialised. Fall back to a random, locally administered
+	 * address. It is not stable across boots (nor are the pairings)
+	 * until the bootloader or the dtsi supplies a real one.
+	 */
+	if (device_property_read_u8_array(&rpdev->dev, "local-bd-address",
+					  (u8 *)&addr, sizeof(addr)) ||
+	    !bacmp(&addr, BDADDR_ANY)) {
+		get_random_bytes(&addr, sizeof(addr));
+		/* The binding stores local-bd-address least significant byte
+		 * first, so the first octet of the printed address - where the
+		 * multicast and locally administered bits live - is the last
+		 * byte. Setting them on byte 0 would leave it a real multicast
+		 * address half the time. */
+		((u8 *)&addr)[5] = (((u8 *)&addr)[5] & 0xfc) | 0x02;
+		dev_warn(&rpdev->dev, "no local-bd-address, using %pMR\n",
+			 &addr);
+	}
+	bacpy(&hdev->public_addr, &addr);
 
 	hdev->manufacturer = 1855;
 	hdev->bus = HCI_SMD;
