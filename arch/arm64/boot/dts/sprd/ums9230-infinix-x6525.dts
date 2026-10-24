@@ -726,8 +726,44 @@
 	status = "okay";
 };
 
+/*
+ * GPU DVFS. The frequencies and voltages are the stock kernel's own table for
+ * this GPU (operating-points in its gpu@23100000 node): 384 MHz @ 0.70 V,
+ * 512 MHz and 614.4 MHz @ 0.75 V, 768 MHz @ 0.80 V. The stock table also has
+ * 850 MHz @ 0.80 V, which the mainline GPU clock has no fixed parent for - it
+ * would need the GPU PLL to be programmed - so it is left out until that path
+ * is tested. Without an OPP table Panfrost runs at whatever rate the
+ * bootloader left and never scales.
+ */
+/ {
+	gpu_opp_table: opp-table {
+		compatible = "operating-points-v2";
+
+		opp-384000000 {
+			opp-hz = /bits/ 64 <384000000>;
+			opp-microvolt = <700000>;
+		};
+
+		opp-512000000 {
+			opp-hz = /bits/ 64 <512000000>;
+			opp-microvolt = <750000>;
+		};
+
+		opp-614400000 {
+			opp-hz = /bits/ 64 <614400000>;
+			opp-microvolt = <750000>;
+		};
+
+		opp-768000000 {
+			opp-hz = /bits/ 64 <768000000>;
+			opp-microvolt = <800000>;
+		};
+	};
+};
+
 &gpu {
 	mali-supply = <&vddgpu>;
+	operating-points-v2 = <&gpu_opp_table>;
 	status = "okay";
 };
 
