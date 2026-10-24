@@ -750,6 +750,19 @@ static const struct sdhci_pltfm_data sdhci_sprd_pdata = {
 	.ops = &sdhci_sprd_ops,
 };
 
+/*
+ * The driver marks HS200 broken for every r11 controller, which also clears
+ * MMC_CAP2_HS200 in the core (and HS400 is gated behind HS200). The UMS9230's
+ * stock kernel runs this eMMC at HS400, so the quirk is too broad for at
+ * least this SoC - but clearing it by default would change the root
+ * filesystem's link at boot, before anything can be tested. Opt in with
+ * sdhci_sprd.enable_hs200=1 on the kernel command line and watch the boot.
+ */
+static bool enable_hs200;
+module_param(enable_hs200, bool, 0444);
+MODULE_PARM_DESC(enable_hs200,
+		 "Clear SDHCI_QUIRK2_BROKEN_HS200 (default: off)");
+
 static int sdhci_sprd_probe(struct platform_device *pdev)
 {
 	struct sdhci_host *host;
@@ -761,6 +774,9 @@ static int sdhci_sprd_probe(struct platform_device *pdev)
 	host = sdhci_pltfm_init(pdev, &sdhci_sprd_pdata, sizeof(*sprd_host));
 	if (IS_ERR(host))
 		return PTR_ERR(host);
+
+	if (enable_hs200)
+		host->quirks2 &= ~SDHCI_QUIRK2_BROKEN_HS200;
 
 	host->dma_mask = DMA_BIT_MASK(64);
 	pdev->dev.dma_mask = &host->dma_mask;
