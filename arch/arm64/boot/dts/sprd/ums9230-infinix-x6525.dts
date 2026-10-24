@@ -345,6 +345,20 @@
 		output-low;
 		line-name = "charger_en";
 	};
+
+	/*
+	 * The front OV8856's power-down pin. The mainline ov8856 driver
+	 * knows reset but not power-down, so nothing would drive this line;
+	 * the vendor stack pulls it low to bring the sensor out of standby.
+	 * Hold it low for the lifetime of the system - the rails are still
+	 * switched by the driver, so this only keeps the pin from floating.
+	 */
+	ov8856-pwdn-hog {
+		gpio-hog;
+		gpios = <46 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "ov8856_pwdn";
+	};
 };
 
 &i2c4 {
@@ -555,10 +569,52 @@
  * library (libsensor_s5k3l6.so, "s5k3l6_v1"); it runs the part at a 24 MHz
  * MCLK with four lanes and the three modes below.
  *
- * The front camera is an OV8856 in the sensor-main socket (i2c0, reg 0x20,
- * i.e. 0x10, sprd,phyid 2); it is not described yet. The sensor-main2 socket
- * is the decorative second rear lens ("fakeserial" in the HAL).
+ * The front camera is an OV8856 in the sensor-main socket: i2c0, reg 0x20
+ * (the 8-bit form of 0x10), reset on ap_gpio 44, power-down on ap_gpio 46,
+ * I/O from vddcamio, AVDD from vddcama0, DVDD from vddcamd0, on CLK_SENSOR0
+ * (sprd,phyid 2, so the two-lane M port). Its vendor library
+ * (libsensor_ov8856_front.so) runs the part at 24 MHz, but the mainline
+ * driver only has register tables for 19.2 MHz, and CLK_SENSOR0 can supply
+ * either, so the node asks for 19.2 MHz. The mainline driver has no
+ * power-down handling at all, so the pin is held low by a gpio-hog below.
+ * The sensor-main2 socket is the decorative second rear lens
+ * ("fakeserial" in the HAL).
  */
+&i2c0 {
+	status = "okay";
+	clock-frequency = <400000>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	camera@10 {
+		compatible = "ovti,ov8856";
+		reg = <0x10>;
+		reset-gpios = <&ap_gpio 44 GPIO_ACTIVE_LOW>;
+
+		clocks = <&mm_gate CLK_MM_SENSOR0_EB>;
+		clock-names = "xvclk";
+		clock-frequency = <19200000>;
+		assigned-clocks = <&mm_clk CLK_SENSOR0>;
+		assigned-clock-parents = <&pll1 CLK_TWPLL_96M>;
+
+		dovdd-supply = <&vddcamio>;
+		avdd-supply = <&vddcama0>;
+		dvdd-supply = <&vddcamd0>;
+
+		rotation = <270>;
+		orientation = <0>;
+
+		port {
+			ov8856_ep: endpoint {
+				data-lanes = <1 2>;
+				link-frequencies = /bits/ 64
+					<720000000 360000000>;
+				remote-endpoint = <&csi_m_ep>;
+			};
+		};
+	};
+};
+
 &i2c1 {
 	status = "okay";
 	clock-frequency = <400000>;
@@ -609,6 +665,16 @@
 			csi_4lane_ep: endpoint {
 				data-lanes = <0 1 2 3>;
 				remote-endpoint = <&s5k3l6_ep>;
+			};
+		};
+
+		/* M port, 2-lane: the front camera */
+		port@CAMSYS_CSI_M {
+			reg = <CAMSYS_CSI_M>;
+
+			csi_m_ep: endpoint {
+				data-lanes = <0 1>;
+				remote-endpoint = <&ov8856_ep>;
 			};
 		};
 	};
