@@ -18,9 +18,10 @@
  * and a dummy), each with its own sprd,initial-command; only the HX node's
  * 44 packets belong here.
  *
- * Timings: display-timings/timing0 is the native mode (native-mode = <0x02>).
- * Its totals give 60.03 Hz at the declared pixel clock:
- *   (720+155+4+80) * (1612+1020+4+32) * 60.03 = 153.6e6
+ * Timings: the board DT has two, both at a 153.6 MHz pixel clock. timing1 is
+ * the 90 Hz mode, (720+155+4+54) * (1612+180+4+32) * 90.05 = 153.6e6, and is
+ * exposed as the preferred mode; timing0 is 60.03 Hz,
+ * (720+155+4+80) * (1612+1020+4+32) * 60.03 = 153.6e6.
  *
  * Not handled here (unrelated to the panel):
  *   - Charging: the AW32257 reads back as a bq24158 and is driven by mainline's
@@ -36,6 +37,7 @@
 
 #include <linux/backlight.h>
 #include <linux/delay.h>
+#include <linux/kernel.h>
 #include <linux/gpio/consumer.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
@@ -213,11 +215,33 @@ static int td4160_panel_unprepare(struct drm_panel *panel)
 }
 
 /*
- * display-timings/timing0 from the board DT. The blanking looks odd (vfront is
- * 1020 lines) but the totals are self-consistent: 959 x 2668 at 153.6 MHz is
- * 60.03 Hz.
+ * display-timings/timing1 from the board DT: the panel's 90 Hz mode. The pixel
+ * clock is the same as the 60 Hz mode; only the blanking differs, 933 x 1828
+ * totals at 153.6 MHz = 90.05 Hz. It is the preferred mode, so a compositor
+ * that just takes the preferred mode gets 90 Hz; the 60 Hz mode stays
+ * available for anything that asks for it.
  */
-static const struct drm_display_mode td4160_panel_mode = {
+static const struct drm_display_mode td4160_panel_mode_90 = {
+	.clock = 153600,
+	.hdisplay = 720,
+	.hsync_start = 720 + 155,		/* hfront-porch 0x9b */
+	.hsync_end = 720 + 155 + 4,		/* hsync-len 0x04 */
+	.htotal = 720 + 155 + 4 + 54,		/* hback-porch 0x36 */
+	.vdisplay = 1612,
+	.vsync_start = 1612 + 180,		/* vfront-porch 0xb4 */
+	.vsync_end = 1612 + 180 + 4,		/* vsync-len 0x04 */
+	.vtotal = 1612 + 180 + 4 + 32,		/* vback-porch 0x20 */
+	.width_mm = 68,				/* sprd,width-mm 0x44 */
+	.height_mm = 152,			/* sprd,height-mm 0x98 */
+	.type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED,
+};
+
+/*
+ * display-timings/timing0: the panel's 60 Hz mode. The blanking looks odd
+ * (vfront is 1020 lines) but the totals are self-consistent: 959 x 2668 at
+ * 153.6 MHz is 60.03 Hz.
+ */
+static const struct drm_display_mode td4160_panel_mode_60 = {
 	.clock = 153600,
 	.hdisplay = 720,
 	.hsync_start = 720 + 155,		/* hfront-porch 0x9b */
@@ -235,7 +259,26 @@ static const struct drm_display_mode td4160_panel_mode = {
 static int td4160_panel_get_modes(struct drm_panel *panel,
 				  struct drm_connector *connector)
 {
-	return drm_connector_helper_get_modes_fixed(connector, &td4160_panel_mode);
+	const struct drm_display_mode *const modes[] = {
+		&td4160_panel_mode_90,
+		&td4160_panel_mode_60,
+	};
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(modes); i++) {
+		struct drm_display_mode *mode;
+
+		mode = drm_mode_duplicate(connector->dev, modes[i]);
+		if (!mode)
+			return -ENOMEM;
+		drm_mode_set_name(mode);
+		drm_mode_probed_add(connector, mode);
+	}
+
+	connector->display_info.width_mm = 68;
+	connector->display_info.height_mm = 152;
+
+	return ARRAY_SIZE(modes);
 }
 
 static const struct drm_panel_funcs td4160_panel_funcs = {
