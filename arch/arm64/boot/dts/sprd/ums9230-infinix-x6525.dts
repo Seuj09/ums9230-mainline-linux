@@ -830,7 +830,31 @@
 &gpu {
 	mali-supply = <&vddgpu>;
 	operating-points-v2 = <&gpu_opp_table>;
+	#cooling-cells = <2>;
 	status = "okay";
+};
+
+/*
+ * The SoC's own gpu-thermal zone has a sensor (ap_thm2 0) but no trip and no
+ * cooling device, so it only reports. Give it the same 70 C passive point the
+ * CPU zones use and let Panfrost's devfreq cooling scale the GPU; without
+ * this, the GPU stays at its OPP while the CPUs throttle the whole package.
+ */
+&{/thermal-zones/gpu-thermal} {
+	trips {
+		gpu_alert0: trip-point0 {
+			temperature = <70000>;
+			hysteresis = <1000>;
+			type = "passive";
+		};
+	};
+
+	cooling-maps {
+		map0 {
+			trip = <&gpu_alert0>;
+			cooling-device = <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+		};
+	};
 };
 
 &modem {
