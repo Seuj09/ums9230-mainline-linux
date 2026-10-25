@@ -694,6 +694,9 @@
 };
 
 &dpu {
+	assigned-clocks = <&ap_clk CLK_DISPC0>, <&ap_clk CLK_DISPC0_DPI>;
+	assigned-clock-parents = <&pll1 CLK_TWPLL_384M>, <&pll1 CLK_TWPLL_153M6>;
+	assigned-clock-rates = <384000000>, <153600000>;
 	memory-region = <&framebuffer_region>;
 	status = "okay";
 };
@@ -713,6 +716,8 @@
 		/* board DT: ap_gpio 0x32 with flag 0 = active-high.
 		 * Flip this first if the panel stays dark. */
 		reset-gpios = <&ap_gpio 50 GPIO_ACTIVE_HIGH>;
+		avdd-gpios = <&ap_gpio 54 GPIO_ACTIVE_HIGH>;
+		avee-gpios = <&ap_gpio 55 GPIO_ACTIVE_HIGH>;
 
 		port {
 			panel_in: endpoint {

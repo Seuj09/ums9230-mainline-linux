@@ -34,6 +34,14 @@ properties:
       Panel reset. The vendor device tree drives it active-high; this is the
       first thing to check if the panel stays dark.
 
+  avdd-gpios:
+    maxItems: 1
+    description: Positive analog supply enable (AVDD)
+
+  avee-gpios:
+    maxItems: 1
+    description: Negative analog supply enable (AVEE)
+
 required:
   - compatible
   - reg
