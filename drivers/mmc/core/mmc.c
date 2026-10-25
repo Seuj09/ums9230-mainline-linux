@@ -8,6 +8,7 @@
  */
 
 #include <linux/err.h>
+#include <linux/moduleparam.h>
 #include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/stat.h>
@@ -32,6 +33,11 @@
 #define DEFAULT_CMD6_TIMEOUT_MS	500
 #define MIN_CACHE_EN_TIMEOUT_MS 1600
 #define CACHE_FLUSH_TIMEOUT_MS 30000 /* 30s */
+
+static bool enable_cache;
+module_param(enable_cache, bool, 0444);
+MODULE_PARM_DESC(enable_cache,
+		 "Enable volatile eMMC write-back cache (default: off)");
 
 enum mmc_poweroff_type {
 	MMC_POWEROFF_SUSPEND,
@@ -1894,20 +1900,35 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		unsigned int timeout_ms = MIN_CACHE_EN_TIMEOUT_MS;
 
 		timeout_ms = max(card->ext_csd.generic_cmd6_time, timeout_ms);
-		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
-				EXT_CSD_CACHE_CTRL, 1, timeout_ms);
-		if (err && err != -EBADMSG)
-			goto free_card;
+		if (enable_cache) {
+			err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
+					EXT_CSD_CACHE_CTRL, 1, timeout_ms);
+			if (err && err != -EBADMSG)
+				goto free_card;
 
-		/*
-		 * Only if no error, cache is turned on successfully.
-		 */
-		if (err) {
-			pr_warn("%s: Cache is supported, but failed to turn on (%d)\n",
-				mmc_hostname(card->host), err);
-			card->ext_csd.cache_ctrl = 0;
+			/*
+			 * Only if no error, cache is turned on successfully.
+			 */
+			if (err) {
+				pr_warn("%s: Cache is supported, but failed to turn on (%d)\n",
+					mmc_hostname(card->host), err);
+				card->ext_csd.cache_ctrl = 0;
+			} else {
+				card->ext_csd.cache_ctrl = 1;
+			}
 		} else {
-			card->ext_csd.cache_ctrl = 1;
+			/*
+			 * Flush and disable the volatile eMMC cache by default
+			 * so that writes during initramfs fsck/mount, runtime,
+			 * and after resume/reset go straight to NAND and cannot
+			 * leave torn ext4 inode table blocks across reboots.
+			 */
+			mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
+				   EXT_CSD_FLUSH_CACHE, 1,
+				   CACHE_FLUSH_TIMEOUT_MS);
+			mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
+				   EXT_CSD_CACHE_CTRL, 0, timeout_ms);
+			card->ext_csd.cache_ctrl = 0;
 		}
 	}
 
@@ -2152,6 +2173,13 @@ static int _mmc_suspend(struct mmc_host *host, enum mmc_poweroff_type pm_type)
 	 * Avoid cache flush and notify the device to power off quickly.
 	 */
 	if (pm_type != MMC_POWEROFF_UNDERVOLTAGE) {
+		if (pm_type == MMC_POWEROFF_SHUTDOWN &&
+		    host->card->ext_csd.cache_size > 0 &&
+		    !_mmc_cache_enabled(host)) {
+			mmc_switch(host->card, EXT_CSD_CMD_SET_NORMAL,
+				   EXT_CSD_FLUSH_CACHE, 1,
+				   CACHE_FLUSH_TIMEOUT_MS);
+		}
 		err = _mmc_flush_cache(host);
 		if (err)
 			goto out;
