@@ -3,6 +3,7 @@
  * Copyright (C) 2020 Unisoc Inc.
  */
 
+#include <linux/aperture.h>
 #include <linux/component.h>
 #include <linux/dma-mapping.h>
 #include <linux/iommu.h>
@@ -160,6 +161,10 @@ static int sprd_drm_bind(struct device *dev)
 
 	/* init kms poll for handling hpd */
 	drm_kms_helper_poll_init(drm);
+
+	ret = aperture_remove_all_conflicting_devices(DRIVER_NAME);
+	if (ret)
+		goto err_kms_helper_poll_fini;
 
 	ret = drm_dev_register(drm, 0);
 	if (ret < 0)

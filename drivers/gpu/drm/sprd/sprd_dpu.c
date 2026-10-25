@@ -398,6 +398,7 @@ static void sprd_dpu_init(struct sprd_dpu *dpu)
 	struct dpu_context *ctx = &dpu->ctx;
 	u32 int_mask = 0;
 	u32 dpu_version = readl(ctx->base + REG_DPU_VERSION);
+	int i;
 
 	writel(0x00, ctx->base + REG_BG_COLOR);
 
@@ -444,10 +445,15 @@ static void sprd_dpu_init(struct sprd_dpu *dpu)
 	/*
 	 * The DPU is usually enabled by the bootloader to show
 	 * a splash screen. Stop it here when the kernel initializes
-	 * the display.
+	 * the display, and disable all hardware layers so stale
+	 * bootloader addresses do not fault the IOMMU when the DPU
+	 * starts before the first plane commit.
 	 */
 	if (!ctx->stopped)
 		sprd_dpu_stop(dpu);
+
+	for (i = 0; i < 8; i++)
+		layer_reg_wr(ctx, REG_LAY_CTRL, 0x00, i);
 }
 
 static void sprd_dpu_fini(struct sprd_dpu *dpu)
@@ -799,6 +805,12 @@ static int sprd_dpu_context_init(struct sprd_dpu *dpu,
 	if (IS_ERR(ctx->clk)) {
 		dev_err(dev, "failed to get DPU core clock\n");
 		return PTR_ERR(ctx->clk);
+	}
+
+	ctx->dpi_clk = devm_clk_get_optional_enabled(dev, "dpi");
+	if (IS_ERR(ctx->dpi_clk)) {
+		dev_err(dev, "failed to get DPU dpi clock\n");
+		return PTR_ERR(ctx->dpi_clk);
 	}
 
 	/* disable and clear interrupts before register dpu IRQ. */

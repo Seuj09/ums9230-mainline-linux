@@ -58,15 +58,18 @@
 #define LP_HBP_EN BIT(12)
 #define LP_HFP_EN BIT(13)
 #define FRAME_BTA_ACK_EN BIT(14)
+#define LP_CMD_EN BIT(15)
 
 #define TIMEOUT_CNT_CLK_CONFIG 0x40
 #define HTX_TO_CONFIG 0x44
 #define LRX_H_TO_CONFIG 0x48
 
 #define TX_ESC_CLK_CONFIG 0x5C
+#define VBLK_CMD_TRANS_LIMIT 0x64
 
 #define CMD_MODE_CFG 0x68
 #define TEAR_FX_EN BIT(0)
+#define CMD_MODE_ALL_LP (GENMASK(14, 8) | GENMASK(19, 16) | BIT(24))
 
 #define GEN_HDR 0x6C
 #define GEN_DT GENMASK(5, 0)
@@ -399,6 +402,7 @@ static void sprd_dsi_init(struct dsi_context *ctx)
 	writel(0xffffffff, ctx->base + MASK_PROTOCOL_INT);
 	writel(0xffffffff, ctx->base + MASK_INTERNAL_INT);
 	writel(1, ctx->base + DSI_MODE_CFG);
+	dsi_reg_up(ctx, CMD_MODE_CFG, CMD_MODE_ALL_LP, CMD_MODE_ALL_LP);
 	dsi_reg_up(ctx, EOTP_EN, RX_EOTP_EN, 0);
 	dsi_reg_up(ctx, EOTP_EN, TX_EOTP_EN, 0);
 	dsi_reg_up(ctx, RX_PKT_CHECK_CONFIG, RX_PKT_ECC_EN, RX_PKT_ECC_EN);
@@ -475,7 +479,7 @@ static int sprd_dsi_dpi_video(struct dsi_context *ctx)
 		vm->hback_porch;
 
 	writel(0, ctx->base + SOFT_RESET);
-	dsi_reg_wr(ctx, VID_MODE_CFG, FRAME_BTA_ACK_EN, 15, ctx->frame_ack_en);
+	dsi_reg_wr(ctx, VID_MODE_CFG, FRAME_BTA_ACK_EN, 14, ctx->frame_ack_en);
 	dsi_reg_wr(ctx, DPI_VIDEO_FORMAT, DPI_VIDEO_MODE_FORMAT, 0, coding);
 	dsi_reg_wr(ctx, VID_MODE_CFG, VID_MODE_TYPE, 0, ctx->burst_mode);
 	byte_cycle = 95 * hline * ratio_x1000 / 100000;
@@ -490,9 +494,11 @@ static int sprd_dsi_dpi_video(struct dsi_context *ctx)
 	dsi_reg_wr(ctx, VIDEO_VBLK_LINES, VFP_LINES, 0, vm->vfront_porch);
 	dsi_reg_wr(ctx, VIDEO_VBLK_LINES, VBP_LINES, 10, vm->vback_porch);
 	dsi_reg_wr(ctx, VIDEO_VBLK_LINES, VSA_LINES, 20, vm->vsync_len);
+	writel(0x80, ctx->base + VBLK_CMD_TRANS_LIMIT);
 	dsi_reg_up(ctx, VID_MODE_CFG, LP_HBP_EN | LP_HFP_EN | LP_VACT_EN |
-			LP_VFP_EN | LP_VBP_EN | LP_VSA_EN, LP_HBP_EN | LP_HFP_EN |
-			LP_VACT_EN | LP_VFP_EN | LP_VBP_EN | LP_VSA_EN);
+			LP_VFP_EN | LP_VBP_EN | LP_VSA_EN | LP_CMD_EN,
+			LP_HBP_EN | LP_HFP_EN | LP_VACT_EN | LP_VFP_EN |
+			LP_VBP_EN | LP_VSA_EN | LP_CMD_EN);
 
 	hs_to = (hline * vm->vactive) + (2 * bpp_x100) / 100;
 	for (div = 0x80; (div < hs_to) && (div > 2); div--) {
